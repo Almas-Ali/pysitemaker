@@ -1,53 +1,123 @@
-import http.server
-import socketserver
-import os
-from typing import Tuple
+# pysitemaker class with web server and template engines complex querys
+
+
+from urllib.parse import urlparse, parse_qs
+import socket
+import threading
+import json
+from jinja2 import Environment, FileSystemLoader
 
 
 class PySiteMaker:
-    '''Python Based Website Maker.'''
-
     def __init__(self, site_name):
         self.site_name = site_name
+        self.router = Router()
+        self.host = None
+        self.port = None
+        self.debug = False
+        self.static_dir = None
+        self.template_dir = None
+        self.template_env = None
+        self.server = None
 
-    def dir_config(self, templates_dir='templates', static_dir='static'):
-        self.templates_dir = templates_dir
+    def run(self, HOST, PORT, DEBUG):
+        self.host = HOST
+        self.port = PORT
+        self.debug = DEBUG
+        self.server = Server(self.host, self.port, self.debug, self.router)
+        self.server.run()
+
+    def set_static_dir(self, static_dir):
         self.static_dir = static_dir
 
-    def static_url(self, static_path: str):
-        is_file = os.path.isfile(
-            os.path.join(self.static_dir, static_path))
-        is_exists = os.path.exists(
-            os.path.join(self.static_dir, static_path))
-        if is_file:
-            return os.path.abspath(static_path)
+    def set_template_dir(self, template_dir):
+        self.template_dir = template_dir
+        self.template_env = Environment(
+            loader=FileSystemLoader(self.template_dir))
+
+
+class Router:
+    def __init__(self):
+        self.routes = {}
+
+    def route(self, path):
+        def wrapper(func):
+            self.routes[path] = func
+            return func
+        return wrapper
+
+    def get_route(self, path):
+        return self.routes.get(path)
+
+
+class Server:
+    def __init__(self, host, port, debug, router):
+        self.host = host
+        self.port = port
+        self.debug = debug
+        self.router = router
+        self.server = None
+
+    def run(self):
+        self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.server.bind((self.host, self.port))
+        self.server.listen(5)
+        print(f"Server started at {self.host}:{self.port}...")
+
+        while True:
+            client, address = self.server.accept()
+            print(f"Client connected from {address}")
+            threading.Thread(target=self.handle_client, args=(client,)).start()
+
+    def handle_client(self, client):
+        request = client.recv(1024).decode()
+        if not request:
+            return
+
+        request = Request(request)
+        response = Response()
+        route = self.router.get_route(request.path)
+        if route:
+            response.body = route(request)
         else:
-            return is_exists
+            response.body = f"Route {request.path} not found!"
 
-    class Path(http.server.SimpleHTTPRequestHandler):
+        client.sendall(response.get_response())
+        client.close()
 
-        def paths(self, urlpatterns: dict, templates_dir: str):
-            self.urlpatterns = urlpatterns
-            self.templates_dir = templates_dir
-            print(self.urlpatterns, self.templates_dir)
 
-        def do_GET(self):
-            self.send_response(200)
-            for url, template in self.urlpatterns.items():
-                if self.path == url:
-                    self.path = os.path.join(self.templates_dir, template)
-            return http.server.SimpleHTTPRequestHandler.do_GET(self)
+class Request:
+    def __init__(self, request):
+        request = request.splitlines()
+        self.method, self.path, self.protocol = request[0].split(" ")
+        self.headers = {}
+        self.query = {}
+        self.body = {}
 
-        # def urls(self, url: str, template: str):
-        #     self.do_GET(self)
+        for line in request[1:]:
+            if not line:
+                break
+            key, value = line.split(": ")
+            self.headers[key] = value
 
-    @staticmethod
-    def run(HOST='127.0.0.1', PORT=7536, DEBUG=True):
-        Handler = PySiteMaker.Path
-        os.chdir('templates')
-        try:
-            with socketserver.TCPServer((HOST, PORT), Handler) as httpd:
-                print(f'serving at port http://{HOST}:{PORT}')
-                httpd.serve_forever()
-        except OSError:
-            print('[Errno 98] Address already in use !')
+        if self.method == "GET":
+            self.query = parse_qs(urlparse(self.path).query)
+        elif self.method == "POST":
+            self.body = json.loads(request[-1])
+
+
+class Response:
+    def __init__(self):
+        self.status = 200
+        self.headers = {}
+        self.body = ""
+
+    def get_response(self):
+        response = f"HTTP/1.1 {self.status} OK"
+
+        for key, value in self.headers.items():
+            response += f"\r{key}: {value}"
+
+        response += f"\r\n\r\n{self.body}"
+        return response.encode()

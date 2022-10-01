@@ -1,34 +1,37 @@
-# from pysitemaker.server.devserver import StaticServer
-# from server.devserver import StaticServer
-# from server.devserver import Path, Static
+# make pysitemaker app
+
 from pysitemaker import PySiteMaker
-from jinja2 import Environment, FileSystemLoader
 
-app = PySiteMaker(__file__)
 
-# Directory settings
-TEMPLATE_DIR = 'templates'
-STATIC_DIR = 'test'
+app = PySiteMaker('My Site')
 
-# Host settings
-HOST = "127.0.0.1"
-PORT = 7536
+# set static and template directories
 
-app.dir_config(templates_dir=TEMPLATE_DIR, static_dir=STATIC_DIR)
-# static = app.Static(static_dir=STATIC_DIR)
-# path = Path
+app.set_static_dir('static')
 
-# print(static.url_for('test.py'))
+app.set_template_dir('templates')
 
-# urlpatterns = [
-#     path.urls(url='/', template='index.html'),
-# ]
+# set routes
 
-URLPATTERNS = {
-    # "/url" : "template.html",
-    "/index": "index.html",
-}
 
-app.Path.paths(app, urlpatterns=URLPATTERNS, templates_dir=TEMPLATE_DIR)
+@app.router.route('/')
+def index(request):
+    return app.template_env.get_template('index.html').render()
 
-app.run(HOST=HOST, PORT=PORT, DEBUG=True)
+
+@app.router.route('/about')
+def about(request):
+    return app.template_env.get_template('about.html').render()
+
+
+@app.router.route('/contact')
+def contact(request):
+    return app.template_env.get_template('contact.html').render()
+
+
+@app.router.route('/blog')
+def blog(request):
+    return app.template_env.get_template('blog.html').render()
+
+
+app.run(HOST='127.0.0.1', PORT=7536, DEBUG=True)
